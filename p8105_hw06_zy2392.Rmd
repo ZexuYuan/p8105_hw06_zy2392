@@ -1,0 +1,36 @@
+---
+title: "p8105_hw06_zy2392"
+author: "Stephen Yuan"
+date: "12/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+```
+
+## Problem 1
+
+### Import data and tidy data
+
+```{r}
+bw_raw = 
+  read.csv("birthweight.csv") %>% 
+  janitor::clean_names() %>% 
+  drop_na() %>% 
+  mutate(
+    babysex = as.factor(babysex),
+    frace = as.factor(frace),
+    mrace = as.factor(mrace),
+    malform = as.factor(malform)
+  )
+```
+
+### Model fitting
+
+```{r}
+
+```
+
+
+
