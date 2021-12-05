@@ -7,6 +7,8 @@ output: html_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(modelr)
+library(glmnet)
 ```
 
 ## Problem 1
@@ -19,18 +21,177 @@ bw_raw =
   janitor::clean_names() %>% 
   drop_na() %>% 
   mutate(
-    babysex = as.factor(babysex),
-    frace = as.factor(frace),
-    mrace = as.factor(mrace),
-    malform = as.factor(malform)
+    babysex = factor(babysex, levels = c('1','2')),
+    frace = factor(frace, levels = c('1','2','3','4','5','6','7','8','9')),
+    mrace = factor(mrace, levels = c('1', '2', '3', '4', '8')),
+    malform = factor(malform, levels = c('0', '1'))
   )
 ```
 
 ### Model fitting
 
-```{r}
+#### Model selection
 
+Use the **stepwise regression method** to select the best model.
+
+```{r}
+model_fit = lm(bwt ~ ., data = bw_raw) %>% 
+  step(direction = 'backward')
+summary(model_fit)
 ```
 
+**Modeling process:** The model selection process started with all variables, variables whose loss bring the most statistically insignificant effect on the model will be deleted,
+the process will repeat until no further variables deleted could be deleted.
+
+#### Residual plots
+
+```{r}
+bw_raw %>% 
+  add_predictions(model_fit) %>% 
+  add_residuals(model_fit) %>% 
+  ggplot(aes(x = pred, y = resid)) +
+  geom_point(alpha = .4, size = 2) +
+  xlab("Fitted Values") +
+  ylab("Residuals")
+```
+
+**Comment:** residuals are centered around 0, however, there is limited amount of outliers.
+
+#### Two other models
+
+main effects only
+
+```{r}
+model_1 = lm(bwt ~ blength + gaweeks, data = bw_raw)
+
+model_1 %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+```
+
+including three-way interactions
+
+```{r}
+model_2 = lm(bwt ~ bhead * blength * babysex, data = bw_raw)
+
+model_2 %>% 
+  broom::tidy() %>% 
+  knitr::kable(digits = 3)
+```
+
+make comparisons using cross validation
+
+```{r}
+cv_df = 
+  crossv_mc(bw_raw, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+    ) %>% 
+  mutate(model1  = map(train, ~lm(bwt ~ babysex + bhead + blength + delwt + fincome + gaweeks + mheight + mrace + parity + ppwt + smoken, data = .x)),
+         model2  = map(train, ~lm(bwt ~ blength + gaweeks, data = .x)),
+         model3  = map(train, ~lm(bwt ~ bhead * blength * babysex, data = .x))) %>% 
+  mutate(rmse_model1 = map2_dbl(model1, test, ~rmse(model = .x, data = .y)),
+         rmse_model2 = map2_dbl(model2, test, ~rmse(model = .x, data = .y)),
+         rmse_model3 = map2_dbl(model3, test, ~rmse(model = .x, data = .y)))
+```
+
+```{r}
+cv_df %>% 
+  select(starts_with("rmse")) %>% 
+  pivot_longer(
+    everything(),
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_") %>% 
+  mutate(model = fct_inorder(model)) %>% 
+  ggplot(aes(x = model, y = rmse)) + geom_violin()
+```
+
+We can see from the plots, model 1 had the lowest root-mean-square error and model 2 had the largest root-mean-square error. 
+Thus, model 1 had the best performance whereas model 2 had the worst performance, among all three models.
+
+## Problem 2
+
+### Import dataset
+
+```{r}
+weather_df = 
+  rnoaa::meteo_pull_monitors(
+    c("USW00094728"),
+    var = c("PRCP", "TMIN", "TMAX"), 
+    date_min = "2017-01-01",
+    date_max = "2017-12-31") %>%
+  mutate(
+    name = recode(id, USW00094728 = "CentralPark_NY"),
+    tmin = tmin / 10,
+    tmax = tmax / 10) %>%
+  select(name, id, everything())
+```
+
+```{r}
+boot_straps = weather_df %>% 
+  bootstrap(n = 5000) %>% 
+  mutate(
+    models = map(strap,~ lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::tidy),
+    results_glance = map(models, broom::glance)) %>% 
+  select(-strap, -models) %>% 
+  unnest(results, results_glance) %>% 
+  select(.id, term, estimate, r.squared) %>% 
+  pivot_wider(
+    names_from = "term",
+    values_from = "estimate"
+  ) %>% 
+  janitor::clean_names() %>% 
+  mutate(
+    log_coef = log(intercept * tmin)
+  )
+boot_straps
+```
+
+Plot of the distribution of $\hat{r}^2$:
+
+```{r}
+boot_straps %>% 
+  ggplot(aes(x = r_squared)) +
+  geom_density() +
+  xlab("Estimated r squared")
+```
+
+**Comment:** Based on the plot, the $\hat{r}^2$ followed a normal distribution and had a well bell-shape with a mean value around 0.91. It shows that the overvall values of $\hat{r}^2$ were high and the model had a good performance.
+
+Plot of the distribution of $log(\hat{\beta}_0*\hat{\beta}_1)$:
+
+```{r}
+boot_straps %>% 
+  ggplot(aes(x = log_coef)) +
+  geom_density() +
+  xlab("Log(Beta_0 x Beta_1)")
+```
+
+**Comment:** Based on the plot, the $log(\hat{\beta}_0*\hat{\beta}_1)$ also followed a normal distribution and formed a bell-shape with a mean value around 2.01.
+
+* 2.5% and 97.5% quantiles for $\hat{r}^2$:
+
+```{r}
+ci_r = boot_straps %>% 
+  pull(r_squared) %>% 
+  quantile(c(0.025, 0.975))
+ci_r
+```
+
+The 95% confidence interval for $\hat{r}^2$ is (`r round(ci_r[1], 3)`, `r round(ci_r[2], 3)`).
+
+* 2.5% and 97.5% quantiles for $log(\hat{\beta}_0*\hat{\beta}_1)$:
+
+```{r}
+ci_log = boot_straps %>% 
+  pull(log_coef) %>% 
+  quantile(c(0.025, 0.975))
+ci_log
+```
+
+The 95% confidence interval for $log(\hat{\beta}_0*\hat{\beta}_1)$ is (`r round(ci_log[1], 3)`, `r round(ci_log[2], 3)`).
 
 
