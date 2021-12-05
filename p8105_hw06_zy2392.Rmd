@@ -129,72 +129,68 @@ weather_df =
   select(name, id, everything())
 ```
 
-## boostrapping
+```{r}
+boot_sample = function(df) {
+  
+  sample_frac(df, replace = TRUE)
+  
+}
+```
+
+### Analyzing R squared.
 
 ```{r}
 boot_straps = 
-  weather_df %>% 
-  janitor::clean_names() %>% 
-  bootstrap(n = 5000) %>% 
-  mutate(
-    models = map(strap,~ lm(tmax ~ tmin, data = .x) ),
-    results = map(models, broom::tidy),
-    results_glance = map(models, broom::glance)) %>% 
-  select(-strap, -models) %>% 
-  unnest(results, results_glance) %>% 
-  select(.id, term, estimate, r.squared) %>% 
-  pivot_wider(
-    names_from = "term",
-    values_from = "estimate"
-  ) %>%
-  mutate(
-    log_coef = log(intercept * tmin)
+  data_frame(
+    strap_number = 1:5000,
+    strap_sample = rerun(5000, boot_sample(weather_df))
   )
-boot_straps
+bootstrap_results_1 = 
+  boot_straps %>% 
+  mutate(
+    models = map(strap_sample, ~lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::glance)) %>% 
+  select(-strap_sample, -models) %>% 
+  unnest(results) 
+bootstrap_results_1 %>%
+  ggplot(aes(x = adj.r.squared)) + 
+  geom_density()
 ```
 
-Plot of the distribution of $\hat{r}^2$:
+From the plot of adjusted R square, we can see that its distribution looks like normal distribution, with a peak between 0.90 and 0.92.
+
+The 95% CI of adjusted R square is: (`r quantile(bootstrap_results_1$adj.r.squared, probs=0.025)` , `r quantile(bootstrap_results_1$adj.r.squared, probs=0.975)`).
+
+
+### Analyzing log of the product of betas.
 
 ```{r}
-boot_straps %>% 
-  ggplot(aes(x = r_squared)) +
-  geom_density() +
-  xlab("Estimated r squared")
+log_beta_p = function(df) {
+    log(df[1,2]*df[2,2]) %>% 
+    tibble() %>% 
+    mutate(
+      log_betas=.$estimate) %>% 
+    select(log_betas)
+}
 ```
-
-Based on the plot, the $\hat{r}^2$ followed a normal distribution and had a well bell-shape with a mean value around 0.91. It shows that the overvall values of $\hat{r}^2$ were high and the model had a good performance.
-
-Plot of the distribution of $log(\hat{\beta}_0*\hat{\beta}_1)$:
 
 ```{r}
-boot_straps %>% 
-  ggplot(aes(x = log_coef)) +
-  geom_density() +
-  xlab("Log(Beta_0 x Beta_1)")
+bootstrap_results_2=
+  boot_straps %>% 
+  mutate(
+    models = map(strap_sample, ~lm(tmax ~ tmin, data = .x) ),
+    results = map(models, broom::tidy),
+    log_betas = map(results, log_beta_p)) %>% 
+  select(-strap_sample, -models) %>%
+  unnest(log_betas)
 ```
-
-**Comment:** Based on the plot, the $log(\hat{\beta}_0*\hat{\beta}_1)$ also followed a normal distribution and formed a bell-shape with a mean value around 2.01.
-
-* 2.5% and 97.5% quantiles for $\hat{r}^2$:
 
 ```{r}
-ci_r = boot_straps %>% 
-  pull(r_squared) %>% 
-  quantile(c(0.025, 0.975))
-ci_r
+bootstrap_results_2 %>%
+  ggplot(aes(x = log_betas)) + 
+  geom_density()
 ```
 
-The 95% confidence interval for $\hat{r}^2$ is (`r round(ci_r[1], 3)`, `r round(ci_r[2], 3)`).
+From the plot of log of the product of betas, we can see that its distribution also looks like normal distribution, with a peak between 2.00 and 2.025.
 
-* 2.5% and 97.5% quantiles for $log(\hat{\beta}_0*\hat{\beta}_1)$:
-
-```{r}
-ci_log = boot_straps %>% 
-  pull(log_coef) %>% 
-  quantile(c(0.025, 0.975))
-ci_log
-```
-
-The 95% confidence interval for $log(\hat{\beta}_0*\hat{\beta}_1)$ is (`r round(ci_log[1], 3)`, `r round(ci_log[2], 3)`).
-
-
+The 95% CI of log of the product of betas is: (`r quantile(bootstrap_results_2$log_betas, probs=0.025)` , `r quantile(bootstrap_results_2$log_betas, probs=0.975)`).
