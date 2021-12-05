@@ -129,8 +129,12 @@ weather_df =
   select(name, id, everything())
 ```
 
+## boostrapping
+
 ```{r}
-boot_straps = weather_df %>% 
+boot_straps = 
+  weather_df %>% 
+  janitor::clean_names() %>% 
   bootstrap(n = 5000) %>% 
   mutate(
     models = map(strap,~ lm(tmax ~ tmin, data = .x) ),
@@ -142,8 +146,7 @@ boot_straps = weather_df %>%
   pivot_wider(
     names_from = "term",
     values_from = "estimate"
-  ) %>% 
-  janitor::clean_names() %>% 
+  ) %>%
   mutate(
     log_coef = log(intercept * tmin)
   )
@@ -159,7 +162,7 @@ boot_straps %>%
   xlab("Estimated r squared")
 ```
 
-**Comment:** Based on the plot, the $\hat{r}^2$ followed a normal distribution and had a well bell-shape with a mean value around 0.91. It shows that the overvall values of $\hat{r}^2$ were high and the model had a good performance.
+Based on the plot, the $\hat{r}^2$ followed a normal distribution and had a well bell-shape with a mean value around 0.91. It shows that the overvall values of $\hat{r}^2$ were high and the model had a good performance.
 
 Plot of the distribution of $log(\hat{\beta}_0*\hat{\beta}_1)$:
 
